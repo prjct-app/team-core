@@ -1,6 +1,6 @@
 {
   "name": "@prjct.app/team-core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local-first team transport shared by pi-team and the Claude Code team mod: durable inboxes, presence, activity and timeline on disk, plus the team-bridge process.",
   "type": "module",
   "keywords": [

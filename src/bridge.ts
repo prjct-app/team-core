@@ -69,7 +69,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const queue = <T>(action: () => Promise<T>): Promise<T> => {
     const next = serial.value.then(action); serial.value = next.catch(() => {}); return next;
   };
-  const state = { beatAt: 0, stopped: false };
+  const state = { beatAt: 0, stopped: false, polling: false };
 
   const ops: Readonly<Record<string, (args: Args) => Promise<unknown>>> = {
     current: async () => session.saved() ?? null,
@@ -151,7 +151,12 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const server: Server = createServer((request, response) => { void handle(request, response).catch(() => respond(response, 500, { ok: false, error: 'Bridge error.' })); });
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(options.socket, () => resolve()); });
 
-  const timer = setInterval(() => { void queue(poll).catch(() => {}); }, options.pollMs ?? 1000);
+  // One poll at a time: under load a slow poll must not pile up others ahead of the calls that share the queue.
+  const timer = setInterval(() => {
+    if (state.polling) return;
+    state.polling = true;
+    void queue(poll).catch(() => {}).finally(() => { state.polling = false; });
+  }, options.pollMs ?? 1000);
   const stop = async (reason: string): Promise<void> => {
     if (state.stopped) return;
     state.stopped = true;
