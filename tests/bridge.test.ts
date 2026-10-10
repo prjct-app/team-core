@@ -121,3 +121,8 @@ test('a removed member is told once, with the words Pi uses', async t => {
   assert.equal(lost?.type === 'lost' && lost.text, 'You were removed from shop by backend.');
   assert.equal((await call(socket, 'current')).value, null);
 });
+
+test('a socket path longer than Unix allows is refused, never silently cut', async () => {
+  const socket = join(tmpdir(), 'x'.repeat(120), 'b.sock');
+  await assert.rejects(startBridge({ socket, sessionId: 's', cwd: '/', emit: () => {} }), /Unix sockets allow 103/);
+});

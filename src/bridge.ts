@@ -10,6 +10,8 @@ import { clean } from './text.ts';
 /** Bumped when an op or an event changes shape; a client refuses a bridge it does not speak. */
 export const BRIDGE_PROTOCOL = 1;
 export const SCHEMA_VERSION = 2;
+/** The longest Unix socket path every platform accepts (macOS: 104 bytes with the terminator). */
+export const MAX_SOCKET_BYTES = 103;
 
 /** What the bridge writes on stdout, one JSON object per line. */
 export type BridgeEvent =
@@ -139,6 +141,8 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     );
   };
 
+  // macOS cuts a longer Unix socket path without an error, and clients then find nothing there.
+  if (Buffer.byteLength(options.socket) > MAX_SOCKET_BYTES) throw new Error(`Socket path is ${Buffer.byteLength(options.socket)} bytes; Unix sockets allow ${MAX_SOCKET_BYTES}: ${options.socket}`);
   await ensurePrivateDirectory(dirname(options.socket));
   // A socket left by a bridge that crashed; anything else at that path is not ours to remove.
   const stale = await lstat(options.socket).catch(() => undefined);
