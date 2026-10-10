@@ -97,6 +97,11 @@ export class MembershipService {
     readonly boundToSession?: boolean;
     /** Take over an active member from another session: a fork carrying the role forward. */
     readonly adopt?: boolean;
+    /**
+     * Take over an active member even while another terminal holds it online. That
+     * terminal's next heartbeat fails and it learns the role was taken.
+     */
+    readonly steal?: boolean;
   }): Promise<Membership> {
     return withStorageLock(this.lockPath(input.teamId), async () => {
       const team = await this.teams.read(input.teamId);
@@ -109,13 +114,13 @@ export class MembershipService {
       if (input.boundToSession && !input.adopt && active && active.sessionId !== input.sessionId) {
         throw Object.assign(new Error(`Alias "${active.alias}" belongs to another session.`), { code: 'OWNED', cwd: active.cwd });
       }
-      if (active && await this.presence.online(active)) {
+      if (active && !input.steal && await this.presence.online(active)) {
         throw Object.assign(new Error(`Alias "${active.alias}" is already active.`), { code: 'ALREADY_EXISTS' });
       }
       const previous = active ?? [...matching].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
       const memberId = previous?.memberId ?? randomUUID();
       const generation = (previous?.generation ?? 0) + 1;
-      const owner = await this.presence.acquire(input.teamId, memberId, generation);
+      const owner = await this.presence.acquire(input.teamId, memberId, generation, !!input.steal && !!active);
       const timestamp = new Date(this.now()).toISOString();
       try {
         if (!previous) {

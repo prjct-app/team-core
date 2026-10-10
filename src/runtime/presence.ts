@@ -35,7 +35,7 @@ export class PresenceService {
     return `member-${createHash('sha256').update(`${memberId}:${generation}`).digest('hex')}`;
   }
 
-  async acquire(teamId: string, memberId: string, memberGeneration: number): Promise<PresenceOwner> {
+  async acquire(teamId: string, memberId: string, memberGeneration: number, steal = false): Promise<PresenceOwner> {
     const lease = await this.leases.acquire({
       teamId,
       leaseId: this.leaseId(memberId),
@@ -43,6 +43,7 @@ export class PresenceService {
       holderId: this.holderId(memberId, memberGeneration),
       resourceId: memberId,
       ttlMs: this.ttlMs,
+      ...(steal ? { steal: true } : {}),
     });
     return {
       teamId,

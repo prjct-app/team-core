@@ -9,7 +9,7 @@ Requires Node.js **22.19+**. Plain ESM JavaScript with type declarations, with n
 ## What it holds
 
 - **Storage**: teams, members, presence leases, per-member inboxes, delivery leases and receipts under `${PRJCT_HOME:-~/.prjct}/pi-team/`. Every record has strict schemas (`schemaVersion: 2`), byte limits and private permissions, and is written with locks and atomic writes.
-- **`TeamSession`**: one terminal's place in a team. It covers join (with takeover of an offline role), leave, disconnect, heartbeat, send and receive (each message exactly once), activity, timeline, renames, removal and deletion.
+- **`TeamSession`**: one terminal's place in a team. It covers join (with takeover of an offline role, or `steal` of one another terminal holds online: that terminal learns it was taken), leave, disconnect, heartbeat, send and receive (each message exactly once), activity, timeline, renames, removal and deletion.
 - **`team-bridge`**: the same session served over a Unix socket for clients that cannot run Node in-process, such as a Claude Code mod.
 
 ## Use it as a library
@@ -44,8 +44,8 @@ team-bridge serve --socket /path/to/private/dir/b.sock --session <session-id> --
 | --- | --- | --- |
 | `current` | | saved membership or `null` |
 | `teams` | | `[{ id, name }]` |
-| `plan` | `team`, `role` | `{ create, takeFrom? }` |
-| `join` | `team`, `role`, `saved?`, `takeover?`, `cwd?` | `{ created, saved }` |
+| `plan` | `team`, `role`, `steal?` | `{ create, takeFrom?, online? }` |
+| `join` | `team`, `role`, `saved?`, `takeover?`, `steal?`, `cwd?` | `{ created, saved }` |
 | `leave` / `disconnect` | | `true` when a team was left |
 | `send` | `to`, `kind` (`info`, `question`, `handoff`), `body` | `{ messageId, status: "submitted", ... }` |
 | `teammates` / `events` / `overview` | | members with activity; the timeline; every team |

@@ -74,12 +74,12 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const ops: Readonly<Record<string, (args: Args) => Promise<unknown>>> = {
     current: async () => session.saved() ?? null,
     teams: async () => session.teams(),
-    plan: async args => session.plan(text(args, 'team'), text(args, 'role'), options.sessionId),
+    plan: async args => session.plan(text(args, 'team'), text(args, 'role'), options.sessionId, { steal: args.steal === true }),
     join: async args => {
       const saved = args.saved && typeof args.saved === 'object' ? args.saved as Saved : undefined;
       const result = await session.join({
         team: text(args, 'team'), role: text(args, 'role'), sessionId: options.sessionId, cwd: optional(args, 'cwd') ?? options.cwd,
-        ...(saved ? { saved } : {}), ...(args.takeover === true ? { takeover: true } : {}),
+        ...(saved ? { saved } : {}), ...(args.takeover === true ? { takeover: true } : {}), ...(args.steal === true ? { steal: true } : {}),
       });
       state.beatAt = now();
       return { ...result, saved: session.saved() };

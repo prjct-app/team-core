@@ -17,6 +17,8 @@ export type AcquireLease = {
   readonly holderId: string;
   readonly resourceId: string;
   readonly ttlMs: number;
+  /** Replace a live lease: its holder's next renewal fails, which is how it learns it lost. */
+  readonly steal?: boolean;
 };
 
 export type LeaseStoreOptions = {
@@ -83,7 +85,7 @@ export class LeaseStore {
       if (team.state !== 'open') throw Object.assign(new Error(`Team "${input.teamId}" is ${team.state}.`), { code: 'TEAM_CLOSED' });
       const current = await this.read(input.teamId, input.leaseId);
       const now = this.now();
-      if (current && !leaseExpired(current, now)) {
+      if (current && !leaseExpired(current, now) && !input.steal) {
         throw Object.assign(new Error(`Lease "${input.leaseId}" is held.`), { code: 'LEASE_HELD' });
       }
       const lease: Lease = {

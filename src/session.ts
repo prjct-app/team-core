@@ -63,7 +63,7 @@ export type Teammate = {
 export type Fate = { readonly reason: 'deleted' } | { readonly reason: 'removed'; readonly by: string }
   | { readonly reason: 'taken'; readonly cwd: string } | { readonly reason: 'replaced' };
 /** What joining would do, so the person confirms exactly that. */
-export type JoinPlan = { readonly create: boolean; readonly takeFrom?: string };
+export type JoinPlan = { readonly create: boolean; readonly takeFrom?: string; readonly online?: boolean };
 /** Why a saved membership cannot come back: final, so the session stops trying. */
 const gone = (message: string): Error => Object.assign(new Error(message), { code: 'GONE' });
 
@@ -321,16 +321,20 @@ export class TeamSession {
 
   /**
    * What joining `role` in `team` from `sessionId` would do: create the team,
-   * join, or take over a role another Pi session holds while it is offline.
-   * A role online in another terminal is refused here, before any question.
+   * join, or take over a role another session holds while it is offline.
+   * A role online in another terminal is refused here, before any question,
+   * unless `steal`: then it is taken from that terminal (`online: true`).
    */
-  async plan(team: string, role: string, sessionId: string): Promise<JoinPlan> {
+  async plan(team: string, role: string, sessionId: string, options: { readonly steal?: boolean } = {}): Promise<JoinPlan> {
     const teamId = await this.findTeam(assertName(team, 'Team'));
     assertName(role, 'Role');
     if (!teamId) return { create: true };
     const holder = (await this.runtime.teams.listMembers(teamId)).find(member => member.alias === role && member.state === 'active');
     if (!holder || holder.sessionId === sessionId) return { create: false };
-    if (await this.runtime.presence.online(holder)) throw new Error(`"${role}" is online in another terminal (${holder.cwd}). Pick another role.`);
+    if (await this.runtime.presence.online(holder)) {
+      if (!options.steal) throw new Error(`"${role}" is online in another terminal (${holder.cwd}). Pick another role.`);
+      return { create: false, takeFrom: holder.cwd, online: true };
+    }
     return { create: false, takeFrom: holder.cwd };
   }
 
@@ -338,7 +342,7 @@ export class TeamSession {
    * Joins the team named `team` as `role`, creating it on first use. Leaves any
    * team joined before. With `saved`, rejoins that exact team and member by ID.
    */
-  async join(input: { readonly team: string; readonly role: string; readonly sessionId: string; readonly cwd: string; readonly saved?: Saved; readonly takeover?: boolean }): Promise<{ readonly created: boolean }> {
+  async join(input: { readonly team: string; readonly role: string; readonly sessionId: string; readonly cwd: string; readonly saved?: Saved; readonly takeover?: boolean; readonly steal?: boolean }): Promise<{ readonly created: boolean }> {
     await this.leave();
     const found = input.saved && await this.exists(input.saved.teamId) ? input.saved.teamId : await this.findTeam(assertName(input.team, 'Team'));
     if (!found && input.saved) throw gone(`Team ${input.saved.team} no longer exists.`);
@@ -355,7 +359,7 @@ export class TeamSession {
     // A role belongs to the Pi session that took it until it leaves, is removed, or is taken over while offline.
     const membership = await this.runtime.memberships.join({
       teamId, alias: role, sessionId: input.sessionId, cwd: input.cwd, kind: 'external', boundToSession: true,
-      ...(input.takeover ? { adopt: true } : {}), ...(current ? { memberId: current.memberId } : {}),
+      ...(input.takeover ? { adopt: true } : {}), ...(input.steal ? { adopt: true, steal: true } : {}), ...(current ? { memberId: current.memberId } : {}),
     }).catch(error => {
       const { code, cwd } = error as { code?: string; cwd?: string };
       if (code === 'OWNED') throw new Error(`"${role}" in team ${input.team} belongs to another Pi session (${cwd}). Join it again to take it over.`);

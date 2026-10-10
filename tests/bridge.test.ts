@@ -126,3 +126,25 @@ test('a socket path longer than Unix allows is refused, never silently cut', asy
   const socket = join(tmpdir(), 'x'.repeat(120), 'b.sock');
   await assert.rejects(startBridge({ socket, sessionId: 's', cwd: '/', emit: () => {} }), /Unix sockets allow 103/);
 });
+
+test('a role online in another terminal is taken when the joiner asks to steal it; that terminal learns it was taken', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'team-steal-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const root = join(dir, 'store');
+  const first = new TeamSession(new TeamRuntime(new TeamPaths(root)));
+  const second = new TeamSession(new TeamRuntime(new TeamPaths(root)));
+  await first.join({ team: 'shop', role: 'ux', sessionId: 'old', cwd: '/work/old' });
+
+  await assert.rejects(second.plan('shop', 'ux', 'new'), /is online in another terminal/);
+  assert.deepEqual(await second.plan('shop', 'ux', 'new', { steal: true }), { create: false, takeFrom: '/work/old', online: true });
+  await assert.rejects(second.join({ team: 'shop', role: 'ux', sessionId: 'new', cwd: '/work/new' }), /belongs to another/);
+  await second.join({ team: 'shop', role: 'ux', sessionId: 'new', cwd: '/work/new', steal: true });
+  assert.equal(second.saved()?.memberId, first.saved()?.memberId, 'Same member: its inbox and history move with it');
+
+  const beat = await first.heartbeat();
+  assert.equal(beat.lost?.role, 'ux');
+  assert.deepEqual(await first.fate(beat.lost!.teamId, beat.lost!.memberId, 'old'), { reason: 'taken', cwd: '/work/new' });
+  const mate = (await second.teammates()).find(entry => entry.role === 'ux');
+  assert.equal(mate?.online, true);
+  assert.equal(mate?.self, true);
+});
