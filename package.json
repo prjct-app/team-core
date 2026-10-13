@@ -1,6 +1,6 @@
 {
   "name": "@prjct.app/team-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first team transport shared by pi-team and the Claude Code team mod: durable inboxes, presence, activity and timeline on disk, plus the team-bridge process.",
   "type": "module",
   "keywords": [
@@ -27,7 +27,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/bin/team-bridge.js",
     "check": "tsc --noEmit && npm run check:immutable",
     "check:immutable": "! grep -rn '\\blet\\b' src/ || (echo 'Use immutable values: no let bindings in src/' && exit 1)",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "test": "export PI_CODING_AGENT_DIR=\"$(mktemp -d)\" PRJCT_HOME=\"$(mktemp -d)\" && node --import tsx --test tests/*.test.ts",
     "prepack": "npm run build",
     "check:package": "npm pack --dry-run"
   },

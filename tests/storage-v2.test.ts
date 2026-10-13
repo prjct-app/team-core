@@ -274,3 +274,41 @@ test('legacy detection performs a preserve-only root check', async (t) => {
   assert.deepEqual(await readdir(legacy), before, 'Detection neither migrates nor removes legacy content');
   assert.equal((await detectLegacyRoot(join(root, 'missing'))).present, false);
 });
+
+test('a lock leaked by a process that is still running is reclaimed once it is abandoned', async (t: TestContext) => {
+  const root = await mkdtemp(join(tmpdir(), 'team-core-leaked-lock-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'membership.lock');
+  // This process is alive, so only the age can mark the lock as abandoned.
+  await writeFile(path, JSON.stringify({ pid: process.pid, token: 'leaked', createdAt: new Date(0).toISOString() }), { mode: 0o600 });
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60_000);
+  await utimes(path, tenMinutesAgo, tenMinutesAgo);
+  assert.equal(await withStorageLock(path, async () => 'claimed'), 'claimed');
+});
+
+test('a fresh lock held by a running process is still respected', async (t: TestContext) => {
+  const root = await mkdtemp(join(tmpdir(), 'team-core-held-lock-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'membership.lock');
+  await writeFile(path, JSON.stringify({ pid: process.pid, token: 'held', createdAt: new Date().toISOString() }), { mode: 0o600 });
+  const oneMinuteAgo = new Date(Date.now() - 60_000);
+  await utimes(path, oneMinuteAgo, oneMinuteAgo);
+  await assert.rejects(withStorageLock(path, async () => 'claimed', { retryMs: 1 }), /Storage lock is busy/);
+});
+
+test('a lock held by a running action is not taken by another caller, and is released afterwards', async (t: TestContext) => {
+  const root = await mkdtemp(join(tmpdir(), 'team-core-exclusive-lock-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'membership.lock');
+  const order: string[] = [];
+  const first = withStorageLock(path, async () => {
+    order.push('first-start');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    order.push('first-end');
+  }, { staleMs: 50 });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const second = withStorageLock(path, async () => { order.push('second'); }, { staleMs: 50, retryMs: 5 });
+  await Promise.all([first, second]);
+  assert.deepEqual(order, ['first-start', 'first-end', 'second']);
+  await assert.rejects(stat(path), /ENOENT/);
+});

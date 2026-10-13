@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { link, lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
+import { link, lstat, mkdir, open, readdir, rename, unlink, utimes } from 'node:fs/promises';
 import { basename, dirname, join, relative, sep } from 'node:path';
 
 export const DEFAULT_MAX_RECORD_BYTES = 256 * 1024;
@@ -202,6 +202,9 @@ export async function jsonFileNames(path: string, create = true): Promise<string
     .sort();
 }
 
+/** Past this age a storage lock is abandoned even when its process still runs. */
+const ABANDONED_LOCK_MS = 5 * 60_000;
+
 async function processAlive(pid: number): Promise<boolean> {
   try { process.kill(pid, 0); return true; }
   catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
@@ -215,7 +218,11 @@ async function staleLock(path: string, staleMs: number): Promise<boolean> {
   if (!info) return false;
   if (!info.isFile() || info.isSymbolicLink()) throw storageError(`Unsafe lock file: ${path}.`, 'UNSAFE_STORAGE');
   assertPrivateMode(path, info);
-  if (Date.now() - info.mtimeMs <= staleMs) return false;
+  const age = Date.now() - info.mtimeMs;
+  if (age <= staleMs) return false;
+  // Storage actions take milliseconds. A lock this old was leaked (a failed release or a hung action)
+  // by a process that is still running, so a live pid alone must not keep it forever.
+  if (age > Math.max(staleMs, ABANDONED_LOCK_MS)) return true;
   const text = await readText(path, 4096);
   const pid = (() => {
     try {
@@ -275,7 +282,7 @@ async function reclaimStaleGate(path: string, staleMs: number): Promise<boolean>
       catch { return {} as { pid?: unknown }; }
     })();
     const pid = typeof parsed.pid === 'number' && Number.isSafeInteger(parsed.pid) && parsed.pid > 0 ? parsed.pid : undefined;
-    if (pid !== undefined && await processAlive(pid)) return false;
+    if (pid !== undefined && await processAlive(pid) && Date.now() - info.mtimeMs <= Math.max(staleMs, ABANDONED_LOCK_MS)) return false;
     const current = await lstat(path).catch(() => undefined);
     if (!current || current.dev !== info.dev || current.ino !== info.ino) return false;
     await unlink(path);
@@ -321,7 +328,9 @@ async function releaseOwnedLock(path: string, token: string, retryMs: number, st
     if (released.entered) return;
     await new Promise(resolve => setTimeout(resolve, retryMs + Math.min(attempt, 20)));
   }
-  throw storageError(`Storage lock gate is busy: ${path}.`, 'STORAGE_BUSY');
+  // The gate stayed busy. Release by token anyway: a lock left behind by a living process is what
+  // blocked every other session for hours, and the token check keeps this from removing anyone else's lock.
+  await releaseLock(path, token);
 }
 
 export async function withStorageLock<T>(path: string, action: () => Promise<T>, options: LockOptions = {}): Promise<T> {
@@ -335,8 +344,15 @@ export async function withStorageLock<T>(path: string, action: () => Promise<T>,
     const claim = await claimLock(path, staleMs);
     const owned = claim.entered ? claim.value : undefined;
     if (owned) {
+      // A holder keeps its lock fresh while it works, so only a lock nobody refreshes ever looks abandoned.
+      const heartbeat = setInterval(() => {
+        const now = new Date();
+        void utimes(path, now, now).catch(() => {});
+      }, Math.max(1_000, Math.floor(staleMs / 3)));
+      heartbeat.unref?.();
       try { return await action(); }
       finally {
+        clearInterval(heartbeat);
         await owned.handle.close();
         await releaseOwnedLock(path, owned.token, retryMs, staleMs);
       }
