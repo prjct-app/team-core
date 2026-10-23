@@ -4,7 +4,7 @@ The team transport shared by [pi-team](https://github.com/prjct-app/pi-team) (Pi
 
 You do not install it by hand. `pi install npm:@prjct.app/pi-team` pulls it in as a dependency, and the Claude Code mod ships the bridge prebuilt.
 
-Requires Node.js **22.19+**. Plain ESM JavaScript with type declarations, with no Pi and no Claude Code imports.
+Requires Node.js **22.23.4+**. Plain ESM JavaScript with type declarations, with no Pi and no Claude Code imports.
 
 ## What it holds
 
